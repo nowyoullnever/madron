@@ -1,0 +1,5 @@
+add_library(madron_timbre STATIC Source/TimbreResynth.cpp)
+target_include_directories(madron_timbre PUBLIC Include)
+target_link_libraries(madron_timbre PUBLIC madron::dsp_core)
+target_compile_features(madron_timbre PUBLIC cxx_std_20)
+add_library(madron::timbre ALIAS madron_timbre)

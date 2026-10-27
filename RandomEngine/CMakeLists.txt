@@ -1,0 +1,5 @@
+add_library(madron_random STATIC Source/Graph.cpp)
+target_include_directories(madron_random PUBLIC Include)
+target_link_libraries(madron_random PUBLIC madron::dsp_core)
+target_compile_features(madron_random PUBLIC cxx_std_20)
+add_library(madron::random ALIAS madron_random)
