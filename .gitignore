@@ -8,6 +8,7 @@
 # JUCE-generated products
 /**/*_artefacts/
 /**/*.vst3/
+/dist/Madron-1.0.0-Windows-x64/
 
 # OS/editor files
 .DS_Store
