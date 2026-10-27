@@ -1,28 +1,14 @@
 #include <madron/timbre/TimbreResynth.h>
+
+#include <algorithm>
+
 namespace madron::timbre {
-bool TimbreResynth::prepare(const dsp::ProcessSpec& spec) { prepared_ = dsp::isSupportedStereoOrMono(spec); if (prepared_) spec_=spec; reset(); return prepared_; }
-void TimbreResynth::reset() noexcept { eventRead_.store(0,std::memory_order_relaxed); eventWrite_.store(0,std::memory_order_relaxed); activePartials_.fill({}); }
-void TimbreResynth::setParameters(const Parameters& p) noexcept { parameters_=p; if(parameters_.activeVoices>maximumVoices) parameters_.activeVoices=maximumVoices; }
-bool TimbreResynth::enqueuePartial(const PartialEvent& event) noexcept {
-    if(event.voiceIndex>=maximumVoices) return false;
-    const auto write=eventWrite_.load(std::memory_order_relaxed);
-    const auto next=(write+1)%eventQueueCapacity;
-    if(next==eventRead_.load(std::memory_order_acquire)) return false;
-    eventQueue_[write]=event;
-    eventWrite_.store(next,std::memory_order_release);
-    return true;
-}
-bool TimbreResynth::dequeuePartial(PartialEvent& event) noexcept {
-    const auto read=eventRead_.load(std::memory_order_relaxed);
-    if(read==eventWrite_.load(std::memory_order_acquire)) return false;
-    event=eventQueue_[read];
-    eventRead_.store((read+1)%eventQueueCapacity,std::memory_order_release);
-    return true;
-}
-dsp::ProcessResult TimbreResynth::process(const dsp::AudioBufferView& in, const dsp::MutableAudioBufferView& out) noexcept {
-    if(!prepared_) return dsp::ProcessResult::NotPrepared;
-    PartialEvent event {};
-    while(dequeuePartial(event)) activePartials_[event.voiceIndex]=event;
-    return dsp::copyAudio(in,out)?dsp::ProcessResult::Ok:dsp::ProcessResult::InvalidBuffer;
-}
+bool TimbreResynth::prepare(const dsp::ProcessSpec& spec){prepared_=dsp::isSupportedStereoOrMono(spec);if(!prepared_)return false;spec_=spec;channels_.clear();channels_.resize(spec.channelCount);for(auto& ch:channels_)if(!ch.tracker.prepare(spec.sampleRate)||!ch.grain.prepare(spec.sampleRate)||!ch.dryDelay.prepare(GrainResynthesizer::latencySamples)){prepared_=false;return false;}reset();return true;}
+void TimbreResynth::reset() noexcept {for(auto& ch:channels_){ch.tracker.reset();ch.grain.reset();ch.dryDelay.reset();ch.smoothWet=wetDry_.load();}eventRead_.store(0);eventWrite_.store(0);}
+void TimbreResynth::setParameters(const Parameters& p) noexcept {transposeCents_.store(dsp::clampFinite(p.transposeCents,-2400.0f,2400.0f));formantCents_.store(dsp::clampFinite(p.formantCents,-2400.0f,2400.0f));wetDry_.store(dsp::clampFinite(p.wetDry,0.0f,1.0f,1.0f));activeVoices_.store(std::clamp<std::size_t>(p.activeVoices,1,maximumVoices));targetFrequencyHz_.store(dsp::clampFinite(p.targetFrequencyHz,0.0f,12000.0f));}
+Parameters TimbreResynth::parameters() const noexcept{return {transposeCents_.load(),formantCents_.load(),wetDry_.load(),activeVoices_.load(),targetFrequencyHz_.load()};}
+GrainParameters TimbreResynth::snapshot() const noexcept{return {transposeCents_.load(std::memory_order_acquire),formantCents_.load(std::memory_order_acquire),targetFrequencyHz_.load(std::memory_order_acquire),activeVoices_.load(std::memory_order_acquire)};}
+bool TimbreResynth::enqueuePartial(const PartialEvent& event) noexcept {if(event.channelIndex>=channels_.size())return false;const auto write=eventWrite_.load(std::memory_order_relaxed),next=(write+1)%eventQueueCapacity;if(next==eventRead_.load(std::memory_order_acquire))return false;eventQueue_[write]=event;eventWrite_.store(next,std::memory_order_release);return true;}
+void TimbreResynth::dispatchQueuedEvents() noexcept {const auto read=eventRead_.load(std::memory_order_relaxed);if(read==eventWrite_.load(std::memory_order_acquire))return;const auto event=eventQueue_[read];if(event.channelIndex<channels_.size())channels_[event.channelIndex].grain.applyEvent(event);eventRead_.store((read+1)%eventQueueCapacity,std::memory_order_release);}
+dsp::ProcessResult TimbreResynth::process(const dsp::AudioBufferView& input,const dsp::MutableAudioBufferView& output) noexcept {if(!prepared_)return dsp::ProcessResult::NotPrepared;if(!input.isValid()||!output.isValid()||input.channelCount!=spec_.channelCount||output.channelCount!=spec_.channelCount||input.sampleCount!=output.sampleCount||input.sampleCount>spec_.maximumBlockSize)return dsp::ProcessResult::InvalidBuffer;const auto params=snapshot();for(std::size_t sample=0;sample<input.sampleCount;++sample){dispatchQueuedEvents();for(std::size_t c=0;c<spec_.channelCount;++c){auto& ch=channels_[c];const float source=input.channels[c][sample];ch.tracker.push(source);PartialEvent event{};while(ch.tracker.pop(event)){event.channelIndex=c;ch.grain.applyEvent(event);}const float dry=ch.dryDelay.process(source),wet=ch.grain.processSample(source,params);ch.smoothWet+=0.0025f*(wetDry_.load()-ch.smoothWet);output.channels[c][sample]=dry+ch.smoothWet*(wet-dry);}}return dsp::ProcessResult::Ok;}
 } // namespace madron::timbre

@@ -1,5 +1,6 @@
 add_library(madron_dsp_core STATIC
-    Source/Processor.cpp)
+    Source/Processor.cpp
+    Source/Spectral.cpp)
 
 target_include_directories(madron_dsp_core
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/Include)

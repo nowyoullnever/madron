@@ -7,5 +7,7 @@ public:
     void resized() override;
 private:
     MadronAudioProcessor& processor_;
-    juce::Label title_, version_, stateLabel_;
+    juce::Label title_, version_, stateLabel_, engineLabel_, formantLabel_, cepstralLabel_, timbreLabel_;
+    juce::ComboBox engineSelector_;
+    juce::Slider formantShift_, cepstralBlend_, timbreTranspose_;
 };

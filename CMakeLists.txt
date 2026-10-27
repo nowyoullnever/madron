@@ -13,9 +13,11 @@ include(CTest)
 
 add_subdirectory(SharedDSP)
 add_subdirectory(DSP/FormantShifter)
+add_subdirectory(DSP/InputBGenerator)
 add_subdirectory(DSP/CepstralMorph)
 add_subdirectory(DSP/TimbreResynth)
 add_subdirectory(RandomEngine)
+add_subdirectory(Tools)
 
 if(MADRON_BUILD_TESTS)
     add_subdirectory(Tests)
