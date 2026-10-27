@@ -7,6 +7,7 @@
 #include <atomic>
 #include <algorithm>
 #include <mutex>
+#include <string>
 #include <vector>
 
 class MadronAudioProcessor final : public juce::AudioProcessor {
@@ -46,6 +47,9 @@ public:
     bool loadRecipeJson(const juce::String& text);
     void favoriteRecipe(); void restoreFavorite();
     void collectGraphRetirement() noexcept { graph_.collectRetired(); }
+    void toggleStructureLock();
+    bool toggleNodeLock(madron::random::NodeID id);
+    bool toggleParameterLock(const std::string& id);
     [[nodiscard]] int graphLatencySamples() const noexcept { return static_cast<int>(graph_.latencySamples()); }
 private:
     bool queueRecipe(const madron::random::Recipe& recipe);

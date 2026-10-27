@@ -4,4 +4,4 @@ Recipe JSON은 schema/generator version, seed, category, intensity, complexity, 
 
 `RecipeHistory`는 기본 32 entries의 undo/redo cursor와 favorite snapshot을 보유한다. undo 뒤 새로운 push는 redo tail을 제거한다. plugin Save/Load는 JSON 파일을 사용하고 DAW state에는 현재 JSON과 global wet을 기록한다.
 
-현재 P03 GUI는 graph-level structure lock/개별 parameter lock 편집기를 노출하지 않는다. lock data model, generator 보존 규칙, preset/state round-trip API는 구현되어 있다. 세부 lock editor는 P04 GUI 작업이다.
+P03 기능 검증용 GUI는 Structure Lock, Node ID 기반 node lock, Parameter ID 기반 parameter lock을 제공한다. graph summary에서 node 순서를 확인한 뒤 ID/parameter ID를 입력해 잠글 수 있다. 더 나은 node inspector와 lock 상태 시각화는 P04 GUI 작업이다.

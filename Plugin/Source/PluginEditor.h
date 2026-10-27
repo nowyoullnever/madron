@@ -12,8 +12,8 @@ private:
     MadronAudioProcessor& processor_;
     juce::Label title_, status_, graphLabel_, seedLabel_;
     juce::ComboBox category_, performance_;
-    juce::TextEditor seedInput_;
+    juce::TextEditor seedInput_, nodeIdInput_, parameterIdInput_;
     juce::Slider intensity_, complexity_, wet_, transition_;
-    juce::TextButton roll_{"RANDOM / ROLL"}, undo_{"Undo"}, redo_{"Redo"}, favorite_{"Favorite"}, restoreFavorite_{"Restore Favorite"}, save_{"Save"}, load_{"Load"};
+    juce::TextButton roll_{"RANDOM / ROLL"}, undo_{"Undo"}, redo_{"Redo"}, favorite_{"Favorite"}, restoreFavorite_{"Restore Favorite"}, save_{"Save"}, load_{"Load"}, structureLock_{"Structure Lock"}, nodeLock_{"Lock Node"}, parameterLock_{"Lock Parameter"};
     std::unique_ptr<juce::FileChooser> chooser_;
 };

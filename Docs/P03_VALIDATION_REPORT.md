@@ -14,5 +14,5 @@
 ## Limits
 
 - DAW/FL Studio load, audible comparison, long-duration host stress test는 수행하지 않았다.
-- Lock data model과 serialization은 구현됐지만 P03 GUI에는 individual node/parameter lock editor가 없다.
+- P03 GUI는 ID 기반 Structure/Node/Parameter lock을 제공하지만, lock 상태를 그래프 위에 시각화하는 inspector는 P04 대상이다.
 - CPU estimator는 engine configuration based budget이며 user hardware profiler는 아니다.
