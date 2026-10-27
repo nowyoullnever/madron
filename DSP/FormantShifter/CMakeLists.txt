@@ -1,0 +1,5 @@
+add_library(madron_formant STATIC Source/FormantShifter.cpp)
+target_include_directories(madron_formant PUBLIC Include)
+target_link_libraries(madron_formant PUBLIC madron::dsp_core)
+target_compile_features(madron_formant PUBLIC cxx_std_20)
+add_library(madron::formant ALIAS madron_formant)
