@@ -1,0 +1,14 @@
+# CMake and IDE outputs
+/build/
+/out/
+/.vs/
+/.idea/
+/CMakeUserPresets.json
+
+# JUCE-generated products
+/**/*_artefacts/
+/**/*.vst3/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
