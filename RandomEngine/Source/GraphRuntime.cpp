@@ -1,0 +1,75 @@
+#include <madron/random/GraphRuntime.h>
+
+#include <madron/cepstral/CepstralMorph.h>
+#include <madron/dsp/Spectral.h>
+#include <madron/formant/FormantShifter.h>
+#include <madron/inputb/InputBGenerator.h>
+#include <madron/timbre/TimbreResynth.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <queue>
+#include <sstream>
+#include <unordered_map>
+
+namespace madron::random {
+struct ExecutableGraph::Buffer { std::vector<std::vector<float>> data; std::array<float*,2> write{}; std::array<const float*,2> read{}; };
+struct ExecutableGraph::InputBinding {
+    int sourceSlot { -1 }; float gain { 1.0f }; std::vector<dsp::FixedDelay> delay; std::vector<std::vector<float>> scratch; std::array<float*,2> write{}; std::array<const float*,2> read{};
+    void render(const Buffer& source, std::size_t channels, std::size_t samples) noexcept { for(std::size_t c=0;c<channels;++c) for(std::size_t s=0;s<samples;++s) scratch[c][s]=delay[c].process(source.data[c][s])*gain; }
+    dsp::AudioBufferView view(std::size_t channels, std::size_t samples) const noexcept { return { read.data(), channels, samples }; }
+};
+struct ExecutableGraph::Node {
+    NodeInstance description {}; int outputSlot { -1 }; std::array<InputBinding,2> inputs {}; bool hasSecondary {};
+    std::unique_ptr<formant::FormantShifter> formant {}; std::unique_ptr<cepstral::CepstralMorph> cepstral {}; std::unique_ptr<timbre::TimbreResynth> timbre {}; std::unique_ptr<inputb::InputBGenerator> inputB {};
+    std::size_t latency {};
+};
+namespace {
+std::string nodeName(const NodeType type) { switch(type) { case NodeType::Input:return "Input";case NodeType::Output:return "Output";case NodeType::FormantShifter:return "Formant";case NodeType::CepstralMorph:return "Cepstral";case NodeType::TimbreResynth:return "Timbre";case NodeType::InputBGenerator:return "InputB";case NodeType::Split:return "Split";case NodeType::Merge:return "Merge";} return "Unknown"; }
+float find(const NodeInstance& n, const char* id, float fallback) noexcept { for(const auto& p:n.parameters.values) if(p.id==id) return p.value; return fallback; }
+void applyParameters(ExecutableGraph::Node& node) noexcept {
+    const auto& n=node.description;
+    if(node.formant) node.formant->setParameters({find(n,"formant.shift_cents",0),find(n,"formant.envelope_width",10),find(n,"formant.wet_dry",n.wetDry)});
+    if(node.cepstral) { node.cepstral->setParameters({static_cast<cepstral::FFTSize>(std::clamp(static_cast<int>(find(n,"cepstral.fft_size",1)),0,3)),find(n,"cepstral.envelope_blend",0),find(n,"cepstral.detail_blend",0),find(n,"cepstral.phase_blend",0),static_cast<cepstral::PhaseMode>(std::clamp(static_cast<int>(find(n,"cepstral.phase_mode",0)),0,3))}); node.cepstral->setInternalBParameters({static_cast<inputb::Mode>(std::clamp(static_cast<int>(find(n,"inputb.mode",0)),0,3)),find(n,"inputb.cutoff_hz",1800),find(n,"inputb.resonance",0),find(n,"inputb.drive",2),find(n,"inputb.delay_ms",80),find(n,"inputb.detune_cents",35)}); }
+    if(node.timbre) node.timbre->setParameters({find(n,"timbre.transpose_cents",0),find(n,"timbre.formant_cents",0),find(n,"timbre.wet_dry",n.wetDry),static_cast<std::size_t>(std::clamp(find(n,"timbre.active_voices",20),1.0f,20.0f)),find(n,"timbre.target_hz",0)});
+    if(node.inputB) node.inputB->setParameters({static_cast<inputb::Mode>(std::clamp(static_cast<int>(find(n,"inputb.mode",0)),0,3)),find(n,"inputb.cutoff_hz",1800),find(n,"inputb.resonance",0),find(n,"inputb.drive",2),find(n,"inputb.delay_ms",80),find(n,"inputb.detune_cents",35)});
+}
+}
+ExecutableGraph::~ExecutableGraph() = default;
+std::unique_ptr<ExecutableGraph> GraphCompiler::compile(const GraphDescription& graph, const GraphCompileOptions& options, ValidationResult* error) const {
+    const auto valid=validate(graph); if(!valid || !dsp::isSupportedStereoOrMono(options.spec)){ if(error)*error=valid?ValidationResult{GraphError::InvalidAudioBus,"unsupported process spec"}:valid; return {}; }
+    std::unordered_map<NodeID,std::size_t> index; std::unordered_map<NodeID,std::vector<GraphConnection>> outgoing; std::unordered_map<NodeID,std::vector<GraphConnection>> incoming; std::unordered_map<NodeID,std::size_t> indegree;
+    for(std::size_t i=0;i<graph.nodes.size();++i){index[graph.nodes[i].id]=i;indegree[graph.nodes[i].id]=0;} for(const auto& edge:graph.connections){outgoing[edge.source].push_back(edge);incoming[edge.destination].push_back(edge);++indegree[edge.destination];}
+    std::queue<NodeID> ready; for(const auto& n:graph.nodes)if(indegree[n.id]==0)ready.push(n.id); std::vector<NodeID> order; while(!ready.empty()){auto id=ready.front();ready.pop();order.push_back(id);for(const auto&e:outgoing[id])if(--indegree[e.destination]==0)ready.push(e.destination);} if(order.size()!=graph.nodes.size()){if(error)*error={GraphError::Cycle,"topological sort failed"};return {};}
+    auto result=std::make_unique<ExecutableGraph>(); result->description_=graph;result->spec_=options.spec;
+    std::unordered_map<NodeID,int> slots; std::unordered_map<NodeID,std::size_t> useCount, pathLatency; std::vector<int> freeSlots; std::size_t createdSlots=0;
+    for(const auto& n:graph.nodes) useCount[n.id]=outgoing[n.id].size();
+    auto createBuffer=[&](){ ExecutableGraph::Buffer buffer;buffer.data.assign(options.spec.channelCount,std::vector<float>(options.spec.maximumBlockSize));for(std::size_t c=0;c<options.spec.channelCount;++c){buffer.write[c]=buffer.data[c].data();buffer.read[c]=buffer.data[c].data();}result->buffers_.push_back(std::move(buffer));return static_cast<int>(result->buffers_.size()-1);};
+    std::ostringstream summary;
+    for(const NodeID id:order){const auto& source=graph.nodes[index[id]];ExecutableGraph::Node node;node.description=source;std::size_t inputLatency=0;for(const auto&e:incoming[id])inputLatency=std::max(inputLatency,pathLatency[e.source]); for(const auto&e:incoming[id]){auto& binding=node.inputs[static_cast<std::size_t>(e.destinationPort)];binding.sourceSlot=slots[e.source];binding.gain=e.gain;const auto d=inputLatency-pathLatency[e.source];binding.delay.resize(options.spec.channelCount);binding.scratch.assign(options.spec.channelCount,std::vector<float>(options.spec.maximumBlockSize));for(std::size_t c=0;c<options.spec.channelCount;++c){binding.delay[c].prepare(d);binding.write[c]=binding.scratch[c].data();binding.read[c]=binding.scratch[c].data();}if(e.destinationPort==Port::SecondaryIn)node.hasSecondary=true;}
+        if(source.type!=NodeType::Output){ if(!freeSlots.empty()){node.outputSlot=freeSlots.back();freeSlots.pop_back();}else {if(createdSlots++>=options.maximumBuffers){if(error)*error={GraphError::CostExceeded,"buffer capacity exceeded"};return {};}node.outputSlot=createBuffer();}slots[id]=node.outputSlot; }
+        switch(source.type){case NodeType::FormantShifter:node.formant=std::make_unique<formant::FormantShifter>();if(!node.formant->prepare(options.spec))return{};node.latency=node.formant->getLatencySamples();break;case NodeType::CepstralMorph:node.cepstral=std::make_unique<cepstral::CepstralMorph>();if(!node.cepstral->prepare(options.spec))return{};node.latency=node.cepstral->getLatencySamples();break;case NodeType::TimbreResynth:node.timbre=std::make_unique<timbre::TimbreResynth>();if(!node.timbre->prepare(options.spec))return{};node.latency=node.timbre->getLatencySamples();break;case NodeType::InputBGenerator:node.inputB=std::make_unique<inputb::InputBGenerator>();if(!node.inputB->prepare(options.spec))return{};break;default:break;}applyParameters(node);pathLatency[id]=inputLatency+node.latency;summary<<(summary.tellp()>0?" -> ":"")<<nodeName(source.type);result->nodes_.push_back(std::move(node));
+        for(const auto&e:incoming[id])if(--useCount[e.source]==0){freeSlots.push_back(slots[e.source]);}
+    }
+    const auto computedLatency=pathLatency[order.back()];if(options.fixedOutputLatency && computedLatency>options.fixedOutputLatency){if(error)*error={GraphError::CostExceeded,"latency budget exceeded"};return {};}result->latencySamples_=options.fixedOutputLatency?options.fixedOutputLatency:computedLatency;result->outputDelay_.resize(options.spec.channelCount);for(auto& delay:result->outputDelay_)delay.prepare(result->latencySamples_-computedLatency);result->summary_=summary.str();if(error)*error={};return result;
+}
+dsp::ProcessResult ExecutableGraph::process(const dsp::AudioBufferView& input,const dsp::MutableAudioBufferView& output) noexcept {
+    if(!input.isValid()||!output.isValid()||input.channelCount!=spec_.channelCount||output.channelCount!=spec_.channelCount||input.sampleCount!=output.sampleCount||input.sampleCount>spec_.maximumBlockSize)return dsp::ProcessResult::InvalidBuffer;
+    for(auto& node:nodes_){for(auto& binding:node.inputs)if(binding.sourceSlot>=0)binding.render(buffers_[binding.sourceSlot],spec_.channelCount,input.sampleCount);auto out=[&](){auto& b=buffers_[node.outputSlot];return dsp::MutableAudioBufferView{b.write.data(),spec_.channelCount,input.sampleCount};};auto main=node.inputs[0].view(spec_.channelCount,input.sampleCount);
+        switch(node.description.type){case NodeType::Input:{auto target=out();(void)dsp::copyAudio(input,target);break;}case NodeType::FormantShifter:if(node.formant->process(main,out())!=dsp::ProcessResult::Ok)return dsp::ProcessResult::InvalidBuffer;break;case NodeType::CepstralMorph:if((node.hasSecondary?node.cepstral->process(main,node.inputs[1].view(spec_.channelCount,input.sampleCount),out()):node.cepstral->process(main,out()))!=dsp::ProcessResult::Ok)return dsp::ProcessResult::InvalidBuffer;break;case NodeType::TimbreResynth:if(node.timbre->process(main,out())!=dsp::ProcessResult::Ok)return dsp::ProcessResult::InvalidBuffer;break;case NodeType::InputBGenerator:if(node.inputB->process(main,out())!=dsp::ProcessResult::Ok)return dsp::ProcessResult::InvalidBuffer;break;case NodeType::Split:(void)dsp::copyAudio(main,out());break;case NodeType::Merge:{auto target=out();const float scale=node.hasSecondary?0.70710678f:1.0f;for(std::size_t c=0;c<spec_.channelCount;++c)for(std::size_t s=0;s<input.sampleCount;++s){float v=node.inputs[0].scratch[c][s];if(node.hasSecondary)v+=node.inputs[1].scratch[c][s];target.channels[c][s]=std::isfinite(v)?v*scale:0.0f;}break;}case NodeType::Output:for(std::size_t c=0;c<spec_.channelCount;++c)for(std::size_t s=0;s<input.sampleCount;++s)output.channels[c][s]=outputDelay_[c].process(main.channels[c][s]);break;}
+    }return dsp::ProcessResult::Ok;
+}
+GraphTransition::~GraphTransition(){delete active_;delete incoming_;delete pending_.exchange(nullptr);for(auto* graph:retired_)delete graph;}
+void GraphTransition::resetNonRealtime() noexcept {delete active_;active_=nullptr;delete incoming_;incoming_=nullptr;delete pending_.exchange(nullptr);for(auto& graph:retired_){delete graph;graph=nullptr;}retireRead_.store(0);retireWrite_.store(0);fadePosition_=0;oldBuffer_.clear();newBuffer_.clear();}
+bool GraphTransition::setInitial(std::unique_ptr<ExecutableGraph> graph) noexcept {if(active_||!graph)return false;const auto spec=graph->processSpec();oldBuffer_.assign(spec.channelCount,std::vector<float>(spec.maximumBlockSize));newBuffer_.assign(spec.channelCount,std::vector<float>(spec.maximumBlockSize));active_=graph.release();return true;}
+bool GraphTransition::request(std::unique_ptr<ExecutableGraph> graph) noexcept {if(!graph)return false;auto* displaced=pending_.exchange(graph.release(),std::memory_order_acq_rel);delete displaced;return true;}
+bool GraphTransition::retireFromAudio(ExecutableGraph* graph) noexcept {if(!graph)return true;const auto w=retireWrite_.load(std::memory_order_relaxed),next=(w+1)%retirementCapacity_;if(next==retireRead_.load(std::memory_order_acquire))return false;retired_[w]=graph;retireWrite_.store(next,std::memory_order_release);return true;}
+dsp::ProcessResult GraphTransition::process(const dsp::AudioBufferView& input,const dsp::MutableAudioBufferView& output) noexcept {if(auto* pending=pending_.exchange(nullptr,std::memory_order_acq_rel)){if(incoming_){if(!retireFromAudio(incoming_)){ExecutableGraph* expected=nullptr;if(!pending_.compare_exchange_strong(expected,pending,std::memory_order_acq_rel))retireFromAudio(pending);return active_?active_->process(input,output):dsp::ProcessResult::NotPrepared;}}incoming_=pending;fadePosition_=0;}if(!active_&&incoming_){active_=incoming_;incoming_=nullptr;}if(!active_)return dsp::ProcessResult::NotPrepared;if(!incoming_)return active_->process(input,output);
+    if(oldBuffer_.empty()){ // Allocated before first crossfade is not permitted on audio; reject until prepared buffer exists.
+        return active_->process(input,output);
+    }
+    std::array<float*,2> oldW{},newW{};std::array<const float*,2> oldR{},newR{};for(std::size_t c=0;c<input.channelCount;++c){oldW[c]=oldBuffer_[c].data();newW[c]=newBuffer_[c].data();oldR[c]=oldW[c];newR[c]=newW[c];}const dsp::MutableAudioBufferView oldOut{oldW.data(),input.channelCount,input.sampleCount},newOut{newW.data(),input.channelCount,input.sampleCount};if(active_->process(input,oldOut)!=dsp::ProcessResult::Ok||incoming_->process(input,newOut)!=dsp::ProcessResult::Ok)return dsp::ProcessResult::InvalidBuffer;const auto length=transitionSamples_.load(std::memory_order_acquire);for(std::size_t c=0;c<input.channelCount;++c)for(std::size_t s=0;s<input.sampleCount;++s){const float t=std::min(1.0f,static_cast<float>(fadePosition_+s)/static_cast<float>(length));output.channels[c][s]=oldR[c][s]*std::cos(t*1.57079632679f)+newR[c][s]*std::sin(t*1.57079632679f);}fadePosition_+=input.sampleCount;if(fadePosition_>=length){if(retireFromAudio(active_)){active_=incoming_;incoming_=nullptr;fadePosition_=0;}}return dsp::ProcessResult::Ok;}
+void GraphTransition::collectRetired() noexcept {auto r=retireRead_.load(std::memory_order_relaxed);const auto w=retireWrite_.load(std::memory_order_acquire);while(r!=w){delete retired_[r];retired_[r]=nullptr;r=(r+1)%retirementCapacity_;}retireRead_.store(r,std::memory_order_release);}
+std::size_t GraphTransition::latencySamples() const noexcept {return active_?active_->latencySamples():0;}
+} // namespace madron::random

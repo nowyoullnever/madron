@@ -2,6 +2,8 @@
 #include <madron/formant/FormantShifter.h>
 #include <madron/inputb/InputBGenerator.h>
 #include <madron/random/Graph.h>
+#include <madron/random/GraphRuntime.h>
+#include <madron/random/Recipe.h>
 #include <madron/timbre/PartialTracker.h>
 #include <madron/timbre/TimbreResynth.h>
 
@@ -35,5 +37,27 @@ void sharedAndGraphTests() {
 void formantTests() { madron::formant::FormantShifter shifter;require(shifter.prepare(spec()),"Formant prepare");shifter.setParameters({700.0f,10.0f,1.0f});const auto input=tone(12288,220.0f,0.28f);const auto output=renderMonoStereo(shifter,input,nullptr,73);require(finite(output),"Formant finite output");require(rms(output,4096)>0.01f,"Formant has wet energy");double diff=0.0;for(std::size_t i=4096;i<output.size();++i){const float delayed=input[i-shifter.getLatencySamples()];diff+=std::abs(output[i]-delayed);}require(diff>20.0,"Formant shift changes spectral output");shifter.setParameters({0.0f,8.0f,0.0f});shifter.reset();const auto dry=renderMonoStereo(shifter,input,nullptr,61);require(rms(dry,2048)>0.01f,"Formant latency-aligned dry path"); }
 void cepstralTests() { madron::cepstral::CepstralMorph morph;require(morph.prepare(spec()),"Cepstral prepare");const auto a=tone(12288,220.0f,0.1f),b=tone(12288,440.0f,0.35f);morph.setParameters({madron::cepstral::FFTSize::N1024,1.0f,1.0f,0.4f,madron::cepstral::PhaseMode::Normal});const auto external=renderMonoStereo(morph,a,&b,61);require(finite(external),"Cepstral external finite");require(rms(external,2048)>0.005f,"Cepstral external energy");morph.reset();morph.setParameters({madron::cepstral::FFTSize::N512,0.8f,0.2f,0.6f,madron::cepstral::PhaseMode::BOnly});const auto internal=renderMonoStereo(morph,a,nullptr,61);require(finite(internal),"Cepstral internal finite");double diff=0.0;for(std::size_t i=2048;i<a.size();++i)diff+=std::abs(external[i]-internal[i]);require(diff>5.0,"Cepstral A/B and internal B differ"); }
 void timbreTests() { madron::timbre::PartialTracker tracker;require(tracker.prepare(48000.0),"Partial tracker prepare");const auto input=tone(20000,220.0f);for(float x:input)tracker.push(x);madron::timbre::PartialEvent event{};std::size_t events=0;while(tracker.pop(event))++events;require(events>0,"Partial tracker emits peak events");madron::timbre::TimbreResynth resynth;require(resynth.prepare(spec(127)),"Timbre prepare");resynth.setParameters({1200.0f,300.0f,1.0f,1,0.0f});const auto output=renderMonoStereo(resynth,input,nullptr,127);require(finite(output),"Timbre finite output");require(rms(output,8192)>0.002f,"Timbre grain output has energy");double diff=0.0;for(std::size_t i=8192;i<input.size();++i)diff+=std::abs(output[i]-input[i-resynth.getLatencySamples()]);require(diff>10.0,"Timbre grain resynthesis differs from delayed input"); }
+void p03RandomRuntimeTests() {
+    using namespace madron::random;
+    RecipeGenerator generator;
+    std::vector<std::string> topologies;
+    for (std::uint64_t seed = 1; seed <= 1000; ++seed) {
+        const auto category = static_cast<RecipeCategory>((seed - 1) % 10);
+        const auto recipe = generator.generate({{seed}, category, static_cast<std::uint8_t>(seed % 101), static_cast<std::uint8_t>((seed * 7) % 101), PerformanceMode::Balanced, {}});
+        require(static_cast<bool>(validate(recipe.graph)), "1000 deterministic recipes validate");
+        topologies.push_back(std::to_string(recipe.graph.nodes.size()) + ":" + std::to_string(recipe.graph.connections.size()) + ":" + std::to_string(static_cast<int>(recipe.graph.nodes[1].type)));
+        if (seed == 77) { const auto again = generator.generate({{seed}, category, static_cast<std::uint8_t>(seed % 101), static_cast<std::uint8_t>((seed * 7) % 101), PerformanceMode::Balanced, {}}); require(serializeRecipeJson(recipe) == serializeRecipeJson(again), "same seed produces same recipe"); const auto restored = deserializeRecipeJson(serializeRecipeJson(recipe)); require(restored.has_value() && serializeRecipeJson(*restored) == serializeRecipeJson(recipe), "preset JSON round trip"); }
+    }
+    std::sort(topologies.begin(),topologies.end()); require(std::adjacent_find(topologies.begin(),topologies.end(),std::not_equal_to<>()) != topologies.end(), "random generator produces topology diversity");
+    auto recipe = generator.generate({{123456}, RecipeCategory::SpectralFusion, 70, 70, PerformanceMode::Balanced, {}});
+    GraphCompiler compiler; ValidationResult error; auto graph = compiler.compile(recipe.graph, {spec(128), 32, 8192}, &error); require(graph != nullptr, "cross-source graph compiles");
+    const auto input = tone(16384,220.0f,0.2f); std::vector<float> right(input.size()),out(input.size()),outRight(input.size()); for(std::size_t i=0;i<input.size();++i)right[i]=input[i]*0.7f;
+    for(std::size_t offset=0;graph&&offset<input.size();offset+=128){const auto n=std::min<std::size_t>(128,input.size()-offset);const float* in[]{input.data()+offset,right.data()+offset};float* o[]{out.data()+offset,outRight.data()+offset};require(graph->process({in,2,n},{o,2,n})==madron::dsp::ProcessResult::Ok,"compiled graph processes audio");}
+    require(finite(out),"compiled graph finite output");
+    auto successorRecipe=generator.generate({{654321},RecipeCategory::FormantMutation,55,45,PerformanceMode::Balanced,{}});auto successor=compiler.compile(successorRecipe.graph,{spec(128),32,8192},&error);GraphTransition transition;require(transition.setInitial(std::move(graph))&&transition.request(std::move(successor)),"prepared graphs accept transition");transition.setTransitionSamples(256);for(std::size_t offset=0;offset<1024;offset+=128){const float* in[]{input.data()+offset,right.data()+offset};float* o[]{out.data()+offset,outRight.data()+offset};require(transition.process({in,2,128},{o,2,128})==madron::dsp::ProcessResult::Ok,"crossfade transition processes");}transition.collectRetired();require(finite(out),"crossfade output finite");
+    RecipeHistory history;history.push(recipe);auto next=generator.generate({{123457},RecipeCategory::FormantMutation,20,20,PerformanceMode::Eco,{}});history.push(next);require(history.undo()!=nullptr&&history.redo()!=nullptr,"recipe undo redo");
+    auto lockRoundTrip=recipe;lockRoundTrip.locks.structureLocked=true;lockRoundTrip.locks.parameters.push_back({"formant.shift_cents",321.0f,true});const auto restoredLock=deserializeRecipeJson(serializeRecipeJson(lockRoundTrip));require(restoredLock&&restoredLock->locks.structureLocked&&restoredLock->locks.parameters.size()==1,"lock state preset round trip");
+    RecipeLocks locks;locks.structureLocked=true;const auto locked=generator.generate({{999},RecipeCategory::ExtremeProcessing,100,100,PerformanceMode::Extreme,locks},&recipe);require(locked.graph.nodes.size()==recipe.graph.nodes.size()&&locked.graph.connections.size()==recipe.graph.connections.size(),"structure lock preserves prior graph");
 }
-int main(){sharedAndGraphTests();formantTests();cepstralTests();timbreTests();if(failures==0){std::cout<<"madron P02 DSP tests passed\n";return 0;}std::cerr<<failures<<" tests failed\n";return 1;}
+}
+int main(){sharedAndGraphTests();formantTests();cepstralTests();timbreTests();p03RandomRuntimeTests();if(failures==0){std::cout<<"madron P03 DSP and random graph tests passed\n";return 0;}std::cerr<<failures<<" tests failed\n";return 1;}
