@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Madron VERSION 0.1.0 LANGUAGES CXX)
+project(Madron VERSION 1.0.0 LANGUAGES CXX)
 
 option(MADRON_BUILD_PLUGIN "Build the JUCE VST3 audio effect" ON)
 option(MADRON_BUILD_TESTS "Build the independent DSP and graph tests" ON)

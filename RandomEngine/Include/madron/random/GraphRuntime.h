@@ -62,7 +62,7 @@ public:
     [[nodiscard]] std::size_t latencySamples() const noexcept;
 private:
     bool retireFromAudio(ExecutableGraph* graph) noexcept;
-    static constexpr std::size_t retirementCapacity_ = 8;
+    static constexpr std::size_t retirementCapacity_ = 32;
     ExecutableGraph* active_ {};
     ExecutableGraph* incoming_ {};
     std::atomic<ExecutableGraph*> pending_ { nullptr };
