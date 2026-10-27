@@ -7,7 +7,7 @@
 
 namespace madron::random {
 using NodeID = std::uint32_t;
-enum class NodeType { Input, Output, FormantShifter, CepstralMorph, TimbreResynth, Split, Merge };
+enum class NodeType { Input, Output, FormantShifter, CepstralMorph, TimbreResynth, InputBGenerator, Split, Merge };
 enum class Port : std::uint8_t { AudioOut = 0, MainIn = 0, SecondaryIn = 1 };
 struct ResourceCost { std::uint16_t units { 1 }; std::uint16_t voices {}; };
 struct ParameterValue { std::string id; float value {}; bool locked {}; };
@@ -26,7 +26,8 @@ struct GraphDescription { std::vector<NodeInstance> nodes; std::vector<GraphConn
 struct RecipeSeed { std::uint64_t value {}; };
 struct RandomConstraint { std::uint16_t maximumNodes { 32 }; std::uint16_t maximumCost { 1000 }; bool allowParallel { true }; };
 struct RecipeDefinition { RecipeSeed seed {}; GraphDescription graph; RandomConstraint constraints {}; };
-enum class GraphError { None, DuplicateNode, MissingNode, InvalidSourcePort, InvalidDestinationPort, InvalidAudioBus, DuplicateInput, MissingRequiredInput, Cycle, TooManyNodes, CostExceeded };
+enum class GraphError { None, DuplicateNode, MissingNode, InvalidSourcePort, InvalidDestinationPort, InvalidAudioBus, DuplicateInput, MissingRequiredInput, Cycle, TooManyNodes, CostExceeded, MissingInputNode, MissingOutputNode, UnreachableNode, InvalidParameter };
 struct ValidationResult { GraphError error { GraphError::None }; std::string message; [[nodiscard]] explicit operator bool() const noexcept { return error == GraphError::None; } };
+[[nodiscard]] ResourceCost estimateCost(const NodeInstance& node) noexcept;
 ValidationResult validate(const GraphDescription& graph);
 } // namespace madron::random

@@ -1,6 +1,6 @@
 # Madron
 
-Madron은 Formant Shifter, Cepstral Morph, Timbre Resynth를 독립 DSP engine으로 구성하고, 향후 seed 기반 Random Recipe graph로 직렬·병렬·분기·재결합할 랜덤 스펙트럴 멀티이펙트 VST3다.
+Madron은 Formant Shifter, Cepstral Morph, Timbre Resynth를 독립 DSP engine으로 구성하고, seed 기반 Random Recipe graph로 직렬·병렬·분기·재결합하는 랜덤 스펙트럴 멀티이펙트 VST3다.
 
 ## P02 구현 범위
 
@@ -13,7 +13,7 @@ Madron은 Formant Shifter, Cepstral Morph, Timbre Resynth를 독립 DSP engine�
 - JUCE 8.0.4 고정 VST3 Audio Effect (`Madron`), Stereo I/O, diagnostic engine selector
 - WAV offline renderer와 Release에서도 실행되는 명시적 require 기반 CTest
 
-P03의 Random Recipe graph generation, graph runtime/crossfade, preset/history 및 최종 GUI는 아직 구현하지 않았다. P02는 세 엔진을 독립 target으로 유지한다.
+P03은 Dynamic Graph Runtime, deterministic Random Recipe, graph-level preset/history/state, equal-power graph transition, offline random renderer와 기능 검증용 VST3 controls를 구현했다. 상세 lock editor·host QA·최종 GUI는 P04 범위다.
 
 `psych~` 분석에서 확인된 waveform/grain overlap-add 방향성을 TimbreResynth의 input-ring, 8x auxiliary stream, cubic interpolation, windowed OLA 구조에 반영했다. 정확한 `psych~` window/gain/tracker 구현은 확보되지 않았으므로 독립 정책이며 원본 동등성을 주장하지 않는다.
 
