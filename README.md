@@ -2,18 +2,21 @@
 
 Madron은 Formant Shifter, Cepstral Morph, Timbre Resynth를 독립 DSP engine으로 구성하고, 향후 seed 기반 Random Recipe graph로 직렬·병렬·분기·재결합할 랜덤 스펙트럴 멀티이펙트 VST3다.
 
-## P01 구현 범위
+## P02 구현 범위
 
 - 순수 C++20 `madron_dsp_core` 및 독립 `madron_formant`, `madron_cepstral`, `madron_timbre` targets
 - prepare/reset/process/latency 계약과 Float32 planar buffer view
-- P01의 안전한 pass-through 처리 및 unit test
-- DAG graph model, resource limit/port/cycle validator
-- JUCE 8.0.4 고정 VST3 Audio Effect (`Madron`), Stereo I/O, state persistence, Foundation Build GUI
+- SharedDSP radix-2 FFT/STFT/OLA/window-normalization/dry delay
+- 실제 Formant spectral-envelope shift, Cepstral A/B morph, waveform-grain Timbre resynthesis
+- Internal Input B Generator: filtered/distorted/delayed/detuned copy
+- DAG graph model, resource limit/port/cycle/audio-bus validator
+- JUCE 8.0.4 고정 VST3 Audio Effect (`Madron`), Stereo I/O, diagnostic engine selector
+- WAV offline renderer와 Release에서도 실행되는 명시적 require 기반 CTest
 
-실제 Formant STFT, Cepstral synthesis, partial tracker, PSOLA grain synthesis, recipe generation은 P02/P03 범위다. P01은 이 기능들을 구현됐다고 주장하지 않는다.
+P03의 Random Recipe graph generation, graph runtime/crossfade, preset/history 및 최종 GUI는 아직 구현하지 않았다. P02는 세 엔진을 독립 target으로 유지한다.
 
-`psych~` 분석에서 확인된 waveform/grain overlap-add 계열 구조는 TimbreResynth의 후속 설계 근거일 뿐, P01은 이를 일반 sine/additive 합성으로 대체하지 않는다. 현재 Timbre target은 partial event를 고정 크기 queue로 받아 미래 voice slot에 전달하고, 오디오는 명시적으로 pass-through한다.
+`psych~` 분석에서 확인된 waveform/grain overlap-add 방향성을 TimbreResynth의 input-ring, 8x auxiliary stream, cubic interpolation, windowed OLA 구조에 반영했다. 정확한 `psych~` window/gain/tracker 구현은 확보되지 않았으므로 독립 정책이며 원본 동등성을 주장하지 않는다.
 
 ## 빌드
 
-`Docs/BUILD.md`의 CMake preset 절차를 사용한다. Release VST3 expected output은 `build/windows-release/Plugin/Madron_artefacts/Release/VST3/Madron.vst3`이며 자동 설치는 하지 않는다.
+`Docs/BUILD.md`의 CMake preset 절차를 사용한다. Release VST3 expected output은 `build/windows-release/Plugin/Madron_artefacts/Release/VST3/Madron.vst3`이며 자동 설치는 하지 않는다. Offline renderer 사용법은 `Docs/OFFLINE_RENDERER.md`에 있다.

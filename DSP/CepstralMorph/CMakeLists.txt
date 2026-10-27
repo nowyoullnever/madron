@@ -1,5 +1,5 @@
 add_library(madron_cepstral STATIC Source/CepstralMorph.cpp)
 target_include_directories(madron_cepstral PUBLIC Include)
-target_link_libraries(madron_cepstral PUBLIC madron::dsp_core)
+target_link_libraries(madron_cepstral PUBLIC madron::dsp_core madron::input_b)
 target_compile_features(madron_cepstral PUBLIC cxx_std_20)
 add_library(madron::cepstral ALIAS madron_cepstral)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cmath>
 #include <string_view>
 
 namespace madron::dsp {
@@ -24,7 +25,10 @@ struct ParameterDescriptor {
 
 inline float normalizedToValue(const ParameterDescriptor& descriptor, const float normalized) noexcept {
     const auto n = normalized < 0.0f ? 0.0f : (normalized > 1.0f ? 1.0f : normalized);
-    return descriptor.minimum + (descriptor.maximum - descriptor.minimum) * n;
+    if (descriptor.mapping == ParameterMapping::Exponential && descriptor.minimum > 0.0f && descriptor.maximum > descriptor.minimum)
+        return descriptor.minimum * std::pow(descriptor.maximum / descriptor.minimum, n);
+    const float value = descriptor.minimum + (descriptor.maximum - descriptor.minimum) * n;
+    return descriptor.mapping == ParameterMapping::Enumerated ? std::round(value) : value;
 }
 
 class AtomicParameter {

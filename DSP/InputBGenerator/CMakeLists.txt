@@ -1,0 +1,5 @@
+add_library(madron_input_b STATIC Source/InputBGenerator.cpp)
+target_include_directories(madron_input_b PUBLIC Include)
+target_link_libraries(madron_input_b PUBLIC madron::dsp_core)
+target_compile_features(madron_input_b PUBLIC cxx_std_20)
+add_library(madron::input_b ALIAS madron_input_b)
