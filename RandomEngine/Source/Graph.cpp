@@ -35,11 +35,21 @@ ResourceCost estimateCost(const NodeInstance& node) noexcept {
     }
     return { 1000, 0 };
 }
+std::size_t estimateMemoryBytes(const NodeInstance& node) noexcept {
+    switch(node.type) {
+        case NodeType::CepstralMorph: { std::size_t fft=1024; for(const auto& p:node.parameters.values)if(p.id=="cepstral.fft_size")fft=512u<<static_cast<unsigned>(std::clamp(p.value,0.0f,3.0f)); return fft*2u*14u*sizeof(float); }
+        case NodeType::TimbreResynth: return 2u*(16384u+32768u+32768u)*sizeof(float);
+        case NodeType::FormantShifter: return 2u*4096u*8u*sizeof(float);
+        case NodeType::InputBGenerator: return 2u*24000u*sizeof(float);
+        case NodeType::Split: case NodeType::Merge: return 2u*1024u*sizeof(float);
+        default: return 0;
+    }
+}
 ValidationResult validate(const GraphDescription& graph) {
     if (graph.nodes.size() > graph.maximumNodes) return {GraphError::TooManyNodes, "node limit exceeded"};
-    std::unordered_map<NodeID, NodeType> types; std::uint32_t cost=0; std::size_t inputs=0, outputs=0;
-    for (const auto& node: graph.nodes) { if (!types.emplace(node.id,node.type).second) return {GraphError::DuplicateNode,"duplicate node id"}; if(node.type==NodeType::Input)++inputs; if(node.type==NodeType::Output)++outputs; for(const auto& p:node.parameters.values) if(!parameterValid(p)) return {GraphError::InvalidParameter,"invalid parameter"}; cost += estimateCost(node).units; }
-    if (cost > graph.maximumCost) return {GraphError::CostExceeded,"resource cost exceeded"};
+    std::unordered_map<NodeID, NodeType> types; std::uint32_t cost=0; std::size_t memory=0, inputs=0, outputs=0;
+    for (const auto& node: graph.nodes) { if (!types.emplace(node.id,node.type).second) return {GraphError::DuplicateNode,"duplicate node id"}; if(node.type==NodeType::Input)++inputs; if(node.type==NodeType::Output)++outputs; for(const auto& p:node.parameters.values) if(!parameterValid(p)) return {GraphError::InvalidParameter,"invalid parameter"}; cost += estimateCost(node).units; memory+=estimateMemoryBytes(node); }
+    if (cost > graph.maximumCost) return {GraphError::CostExceeded,"resource cost exceeded"}; if(memory>graph.maximumMemoryBytes)return {GraphError::CostExceeded,"memory budget exceeded"};
     std::unordered_set<std::uint64_t> occupied; std::unordered_map<NodeID,std::vector<NodeID>> edges;
     for (const auto& edge: graph.connections) {
         const auto source=types.find(edge.source), destination=types.find(edge.destination);

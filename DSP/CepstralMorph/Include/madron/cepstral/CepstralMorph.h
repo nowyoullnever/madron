@@ -46,7 +46,9 @@ private:
     void morphSpectrum(Variant& variant, Channel& channel, std::span<dsp::Complex> spectrum) noexcept;
     dsp::ProcessResult processImpl(const dsp::AudioBufferView& inputA, const dsp::AudioBufferView& inputB, const dsp::MutableAudioBufferView& output) noexcept;
     static constexpr std::array<std::size_t,4> sizes_ { 512,1024,2048,4096 };
-    dsp::ProcessSpec spec_ {}; std::array<Variant,4> variants_ {};
+    // Each prebuilt graph owns only its selected FFT pipeline. A size change is
+    // represented by a separately prepared graph and crossfaded by the runtime.
+    dsp::ProcessSpec spec_ {}; Variant variant_ {}; int preparedSelection_ { 1 };
     inputb::InputBGenerator inputB_ {}; std::vector<std::vector<float>> internalBBuffer_ {}; std::vector<float*> internalBPointers_ {}; std::vector<const float*> internalBConstPointers_ {};
     std::atomic<int> fftSelection_ { 1 }, phaseMode_ { 0 }; std::atomic<float> envelopeBlend_ { 0.0f }, detailBlend_ { 0.0f }, phaseBlend_ { 0.0f };
     bool prepared_ {};

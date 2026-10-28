@@ -35,6 +35,9 @@ public:
     void setThemeDark(bool dark) noexcept { themeDark_.store(dark, std::memory_order_release); }
     [[nodiscard]] bool isThemeDark() const noexcept { return themeDark_.load(std::memory_order_acquire); }
     [[nodiscard]] juce::String graphSummary() const; [[nodiscard]] juce::String recipeJson() const;
+    // Development/debugger-only snapshot. It is intentionally not rendered by
+    // the VST editor and does not allocate or log from the audio callback.
+    [[nodiscard]] madron::random::GraphTransition::Diagnostics graphDiagnostics() const noexcept { return graph_.diagnostics(); }
     bool loadRecipeJson(const juce::String& text); void undoRecipe(); void redoRecipe(); void favoriteRecipe(); void restoreFavorite();
     void toggleStructureLock(); bool toggleNodeLock(madron::random::NodeID id); bool toggleParameterLock(const std::string& id);
 private:
@@ -43,9 +46,12 @@ private:
     static constexpr std::size_t fixedLatencySamples_ = 8192;
     madron::random::GraphCompiler compiler_ {}; madron::random::GraphTransition graph_ {}; madron::random::RecipeGenerator generator_ {}; madron::random::RecipeHistory history_ {};
     madron::random::Recipe currentRecipe_ {}; std::optional<madron::random::Recipe> restoredRecipe_ {};
-    mutable std::mutex recipeMutex_ {}; std::mutex workMutex_ {}; std::condition_variable_any workSignal_ {}; std::optional<CompileRequest> pendingCompile_ {}; std::jthread worker_ {}; std::atomic<std::uint64_t> generation_ { 0 };
+    mutable std::mutex recipeMutex_ {}; std::mutex workMutex_ {}, graphLifecycleMutex_ {}; std::condition_variable_any workSignal_ {}; std::optional<CompileRequest> pendingCompile_ {}; std::jthread worker_ {}; std::atomic<std::uint64_t> generation_ { 0 };
     juce::ValueTree state_ { "MadronState" }; juce::AudioParameterFloat* mixParameter_ {};
-    std::atomic<int> category_ { static_cast<int>(madron::random::RecipeCategory::TextureMutation) }, performance_ { static_cast<int>(madron::random::PerformanceMode::Balanced) };
+    // -1 is the UI's deterministic Auto Category mode; explicit API/CLI calls
+    // retain their requested category.
+    std::atomic<int> category_ { -1 }, performance_ { static_cast<int>(madron::random::PerformanceMode::Balanced) };
+    std::atomic<int> lastAutoCategory_ { -1 };
     std::atomic<float> intensity_ { 50.0f }, complexity_ { 50.0f }, transitionMilliseconds_ { 100.0f };
     std::atomic<std::uint64_t> seed_ { 0x4d414452ull }; std::atomic<bool> prepared_ { false }, recipeActive_ { false }, themeDark_ { false };
     std::vector<std::vector<float>> dryBuffer_ {}; std::vector<madron::dsp::FixedDelay> dryDelay_ {}; float smoothedWet_ { 0.5f };
