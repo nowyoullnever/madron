@@ -22,12 +22,13 @@ struct GraphConnection {
     std::uint8_t sourceChannels { 2 };
     std::uint8_t destinationChannels { 2 };
 };
-struct GraphDescription { std::vector<NodeInstance> nodes; std::vector<GraphConnection> connections; std::uint16_t maximumNodes { 32 }; std::uint16_t maximumCost { 1000 }; };
+struct GraphDescription { std::vector<NodeInstance> nodes; std::vector<GraphConnection> connections; std::uint16_t maximumNodes { 32 }; std::uint16_t maximumCost { 1000 }; std::size_t maximumMemoryBytes { 24u*1024u*1024u }; };
 struct RecipeSeed { std::uint64_t value {}; };
 struct RandomConstraint { std::uint16_t maximumNodes { 32 }; std::uint16_t maximumCost { 1000 }; bool allowParallel { true }; };
 struct RecipeDefinition { RecipeSeed seed {}; GraphDescription graph; RandomConstraint constraints {}; };
 enum class GraphError { None, DuplicateNode, MissingNode, InvalidSourcePort, InvalidDestinationPort, InvalidAudioBus, DuplicateInput, MissingRequiredInput, Cycle, TooManyNodes, CostExceeded, MissingInputNode, MissingOutputNode, UnreachableNode, InvalidParameter };
 struct ValidationResult { GraphError error { GraphError::None }; std::string message; [[nodiscard]] explicit operator bool() const noexcept { return error == GraphError::None; } };
 [[nodiscard]] ResourceCost estimateCost(const NodeInstance& node) noexcept;
+[[nodiscard]] std::size_t estimateMemoryBytes(const NodeInstance& node) noexcept;
 ValidationResult validate(const GraphDescription& graph);
 } // namespace madron::random
